@@ -10,6 +10,7 @@ const Joi = require("joi");
 const app = express();
 
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static("public"));
 
 //MongoDB connection
 const client = new MongoClient(process.env.MONGODB_HOST);
@@ -18,7 +19,7 @@ let db;
 
 async function connectDB() {
     await client.connect();
-    db = client.db("users");
+    db = client.db(process.env.MONGODB_DATABASE);
     console.log("Connected to MongoDB");
 }
 connectDB();
@@ -42,15 +43,15 @@ app.get("/", (req, res) => {
 
     if (!req.session.name) {
         res.send(`
-    <h2>Home</h2>
-    <a href="/signup">Signup</a><br>
-    <a href="/login">Login</a>
-    `)
+          <h2>Home</h2>
+          <a href="/signup">Signup</a><br>
+          <a href="/login">Login</a>
+       `)
     } else {
         res.send(`
                 <h2>Welcome ${req.session.name}</h2>
                 <a href="/members">Members</a><br>
-                <a href="/logout>Logout</a>
+                <a href="/logout">Logout</a>
                 `);
     }
 });
@@ -60,12 +61,12 @@ app.get("/signup", (req, res) => {
     res.send(`
         <h2>Signup</h2>
         <form method="Post" action="/signup">
-        Name: <input name="name"></br>
-        Email: <input name="email"></br>
-        Password: <input type="password" name="password"></br>
-        <button type="submit">Signup</button>
+             Name: <input name="name"></br>
+             Email: <input name="email"></br>
+             Password: <input type="password" name="password"></br>
+            <button type="submit">Signup</button>
         </form>
-        `);
+    `);
 
 });
 
@@ -73,9 +74,9 @@ app.post("/signup", async (req, res) => {
 
     //validate input
     const schema = Joi.object({
-        name: Joi.string().required(),
-        email: Joi.string().required(),
-        password: Joi.string().required()
+        name: Joi.string().max(50).required(),
+        email: Joi.string().email().required(),
+        password: Joi.string().max(50).required()
     });
 
     const result = schema.validate(req.body);
@@ -84,6 +85,11 @@ app.post("/signup", async (req, res) => {
         return res.send("Invalid input");
     }
 
+    const existing = await db.collection("users").findOne({ email: req.body.email });
+
+    if (existing) {
+        return res.send("Email already exists");
+    }
     //hashpassword
     const hashedPassword = await bcrypt.hash(req.body.password, 10);
 
@@ -114,6 +120,17 @@ app.get("/login", (req, res) => {
 
 app.post("/login", async (req, res) => {
 
+    const schema = Joi.object({
+        email: Joi.string().email().required(),
+        password: Joi.string().required()
+    });
+
+    const result = schema.validate(req.body);
+
+    if (result.error) {
+        return res.send("Invalid input");
+    }
+
     const user = await db.collection("users").findOne({
         email: req.body.email
     });
@@ -137,14 +154,19 @@ app.post("/login", async (req, res) => {
 app.get("/members", (req, res) => {
 
     if (!req.session.name) {
-        return res.redirect("/login");
-
+        return res.redirect("/");
     }
 
-    res.send(`<h2>Welcome ${req.session.name}</h2>
+    const images = ["img1.jpg", "img2.jpg", "img3.jpg"];
+    const randomImage = images[Math.floor(Math.random() * images.length)];
+
+    res.send(`
+        <h2>Welcome ${req.session.name}</h2>
+        <img src="/${randomImage}" width="300"><br><br>
         <a href="/logout">Logout</a>`);
 });
 
+//Logout
 app.get("/logout", (req, res) => {
     req.session.destroy();
     res.redirect("/");
@@ -156,7 +178,6 @@ app.use((req, res) => {
 });
 
 //Start server
-
 app.listen(3000, () => {
     console.log("Server running on port 3000");
 });
