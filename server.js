@@ -109,6 +109,9 @@ app.post("/signup", async (req, res) => {
 
 //Login Page
 app.get("/login", (req, res) => {
+
+    const error = req.query.error || "";
+
     res.send(`
             <h2>Login</h2>
             <form method="POST" action="/login">
@@ -116,6 +119,9 @@ app.get("/login", (req, res) => {
             Password: <input type="password" name="password"></br>
             <button type="submit">Login</button>
             </form>
+
+            <p style="color:black;">${error}</p>
+
             `);
 });
 
@@ -129,7 +135,7 @@ app.post("/login", async (req, res) => {
     const result = schema.validate(req.body);
 
     if (result.error) {
-        return res.send("Invalid input");
+        return res.redirect("/login?error=Invalid input");
     }
 
     const user = await db.collection("users").findOne({
@@ -137,13 +143,13 @@ app.post("/login", async (req, res) => {
     });
 
     if (!user) {
-        return res.send("User not found");
+        return res.redirect("/login?error=User not found");
     }
 
     const valid = await bcrypt.compare(req.body.password, user.password);
 
     if (!valid) {
-        return res.send("Wrong password");
+        return res.redirect("/login?error=Wrong password");
     }
 
     req.session.name = user.name;
@@ -155,27 +161,32 @@ app.post("/login", async (req, res) => {
 app.get("/members", (req, res) => {
 
     if (!req.session.name) {
-        return res.redirect("/");
+        return res.redirect("/login");
     }
 
     const images = ["img1.jpg", "img2.jpg", "img3.jpg"];
     const randomImage = images[Math.floor(Math.random() * images.length)];
 
     res.send(`
-        <h2>Welcome ${req.session.name}</h2>
+        <h2>Hello ${req.session.name}</h2>
         <img src="/${randomImage}" width="300"><br><br>
         <a href="/logout">Logout</a>`);
 });
 
 //Logout
 app.get("/logout", (req, res) => {
-    req.session.destroy();
-    res.redirect("/");
+    req.session.destroy((err) => {
+        if (err) {
+            return res.send("Error loggin out");
+
+        }
+        res.redirect("/");
+    });
 });
 
 //404 Page
 app.use((req, res) => {
-    res.status(404).send("Page not found");
+    res.status(404).send("Page not found - 404");
 });
 
 //Start server
