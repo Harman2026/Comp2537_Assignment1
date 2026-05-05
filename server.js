@@ -29,6 +29,7 @@ app.use(session({
     secret: process.env.NODE_SESSION_SECRET,
     store: MongoStore.create({
         mongoUrl: process.env.MONGODB_HOST,
+        dbName: process.env.MONGODB_DATABASE,
         crypto: {
             secret: process.env.MONGODB_SESSION_SECRET
         }
