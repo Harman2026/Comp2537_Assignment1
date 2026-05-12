@@ -8,6 +8,7 @@ const bcrypt = require("bcrypt");
 const Joi = require("joi");
 
 const app = express();
+app.set('view engine', 'ejs');
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static("public"));
@@ -39,36 +40,53 @@ app.use(session({
     cookie: { maxAge: 60 * 60 * 1000 }
 }));
 
+
+//Middleware
+function isValidSession(req, res, next) {
+
+    if (req.session.user) {
+        next();
+    } else {
+        res.redirect("/login");
+    }
+}
+
+function isAdmin(req, res, next) {
+
+    if (req.session.user.user_type === "admin") {
+        next();
+    } else {
+
+        res.status(403);
+
+        res.send(`
+            <h1>403 Forbidden</h1>
+             <p>You are not authorized.</p>
+
+             <a href="/" style="
+        padding:10px 15px;
+        background:black;
+        color:white;
+        text-decoration:none;
+        border-radius:5px;
+    ">Go Home</a>
+        `);
+    }
+}
+
 //Home route
 app.get("/", (req, res) => {
 
-    if (!req.session.name) {
-        res.send(`
-          <h2>Home</h2>
-          <a href="/signup">Signup</a><br>
-          <a href="/login">Login</a>
-       `)
-    } else {
-        res.send(`
-                <h2>Welcome ${req.session.name}</h2>
-                <a href="/members">Members</a><br>
-                <a href="/logout">Logout</a>
-                `);
-    }
+    res.render("index", {
+        user: req.session.user
+    });
 });
 
 //  Signup Page
 app.get("/signup", (req, res) => {
-    res.send(`
-        <h2>Signup</h2>
-        <form method="Post" action="/signup">
-             Name: <input name="name"></br>
-             Email: <input name="email"></br>
-             Password: <input type="password" name="password"></br>
-            <button type="submit">Signup</button>
-        </form>
-    `);
-
+    res.render("signup", {
+        user: req.session.user
+    });
 });
 
 app.post("/signup", async (req, res) => {
@@ -83,25 +101,38 @@ app.post("/signup", async (req, res) => {
     const result = schema.validate(req.body);
 
     if (result.error) {
-        return res.send("Invalid input");
+        return res.send(`
+            ${result.error.details[0].message}
+            <br><br>
+            <a href="/signup">Try Again</a>
+            `);
     }
 
-    const existing = await db.collection("users").findOne({ email: req.body.email });
+    const existingUser = await db.collection("users").findOne({ email: req.body.email });
 
-    if (existing) {
-        return res.send("Email already exists");
+    if (existingUser) {
+        return res.send(`
+            Email already exists.
+            <br><br>
+            <a href="/signup">Try Again</a>
+            `);
     }
     //hashpassword
-    const hashedPassword = await bcrypt.hash(req.body.password, 10);
+    const hashedPassword = await bcrypt.hash(req.body.password, 12);
 
     //save to database
     await db.collection("users").insertOne({
         name: req.body.name,
         email: req.body.email,
-        password: hashedPassword
+        password: hashedPassword,
+        user_type: "user"
     });
 
-    req.session.name = req.body.name;
+    req.session.user = {
+        name: req.body.name,
+        email: req.body.email,
+        user_type: "user"
+    };
 
     res.redirect("/members");
 
@@ -112,17 +143,10 @@ app.get("/login", (req, res) => {
 
     const error = req.query.error || "";
 
-    res.send(`
-            <h2>Login</h2>
-            <form method="POST" action="/login">
-            Email: <input name="email"></br>
-            Password: <input type="password" name="password"></br>
-            <button type="submit">Login</button>
-            </form>
-
-            <p style="color:black;">${error}</p>
-
-            `);
+    res.render("login", {
+        error: error,
+        user: req.session.user
+    });
 });
 
 app.post("/login", async (req, res) => {
@@ -146,50 +170,80 @@ app.post("/login", async (req, res) => {
         return res.redirect("/login?error=User not found");
     }
 
-    const valid = await bcrypt.compare(req.body.password, user.password);
+    const validPassword = await bcrypt.compare(req.body.password, user.password);
 
-    if (!valid) {
+    if (!validPassword) {
         return res.redirect("/login?error=Wrong password");
     }
 
-    req.session.name = user.name;
+    req.session.user = {
+        name: user.name,
+        email: user.email,
+        user_type: user.user_type
+    };
 
     res.redirect("/members");
 });
 
 //Members Page
-app.get("/members", (req, res) => {
+app.get("/members", isValidSession, (req, res) => {
+    res.render("members", {
+        user: req.session.user
+    });
 
-    if (!req.session.name) {
-        return res.redirect("/login");
-    }
-
-    const images = ["img1.jpg", "img2.jpg", "img3.jpg"];
-    const randomImage = images[Math.floor(Math.random() * images.length)];
-
-    res.send(`
-        <h2>Hello ${req.session.name}</h2>
-        <img src="/${randomImage}" width="300"><br><br>
-        <a href="/logout">Logout</a>`);
 });
+
+//Admin Page
+app.get("/admin", isValidSession, isAdmin, async (req, res) => {
+
+    const users = await db.collection("users").find().toArray();
+
+    res.render("admin", {
+        users: users,
+        user: req.session.user
+    });
+});
+
+//Promote User
+app.get("/promote/:email", isValidSession, isAdmin, async (req, res) => {
+
+    await db.collection("users").updateOne(
+        { email: req.params.email },
+        { $set: { user_type: "admin" } }
+    );
+    res.redirect("/admin");
+});
+
+//Demote User 
+app.get("/demote/:email", isValidSession, isAdmin, async (req, res) => {
+
+    await db.collection("users").updateOne(
+        { email: req.params.email },
+        { $set: { user_type: "user" } }
+    );
+    res.redirect("/admin");
+
+});
+
 
 //Logout
 app.get("/logout", (req, res) => {
-    req.session.destroy((err) => {
-        if (err) {
-            return res.send("Error loggin out");
+    req.session.destroy(() => {
 
-        }
         res.redirect("/");
     });
 });
 
 //404 Page
 app.use((req, res) => {
-    res.status(404).send("Page not found - 404");
+    res.status(404);
+    res.render("404", {
+        user: req.session.user
+    });
 });
 
 //Start server
-app.listen(3000, () => {
-    console.log("Server running on port 3000");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
